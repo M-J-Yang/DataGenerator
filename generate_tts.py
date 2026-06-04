@@ -18,7 +18,19 @@ import torch
 
 DEFAULT_MODEL_DIR = "pretrained_models/Fun-CosyVoice3-0.5B-2512"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.<|endofprompt|>"
-DEFAULT_ACCENT_INSTRUCT = "You are a helpful assistant. 请用与参考音频一致的方言或口音表达，尽量模仿参考音频的语调、发音习惯和说话节奏，不要改成标准普通话。<|endofprompt|>"
+DEFAULT_ACCENT_INSTRUCT = ""
+SUPPORTED_DIALECTS = (
+    "广东话", "东北话", "甘肃话", "贵州话", "河南话", "湖北话",
+    "湖南话", "江西话", "闽南话", "宁夏话", "山西话", "陕西话",
+    "山东话", "上海话", "四川话", "天津话", "云南话",
+)
+DIALECT_BY_SPEAKER = {
+    "spk001": "陕西话",
+    "spk002": "陕西话",
+    "spk003": "河南话",
+    "spk004": "陕西话",
+    "spk005": "陕西话",
+}
 METADATA_FIELDS = [
     "utt_id",
     "text",
@@ -166,6 +178,23 @@ def resolve_generation_mode(mode: str, ref_wav: Path) -> str:
     return "instruct2" if accent != "standard" else "cross_lingual"
 
 
+def build_instruct_text(args, ref_wav: Path) -> str:
+    speaker_id, _, _ = parse_ref_metadata(ref_wav)
+    dialect = args.dialect or DIALECT_BY_SPEAKER.get(speaker_id, "")
+    if dialect:
+        if dialect not in SUPPORTED_DIALECTS:
+            supported = ", ".join(SUPPORTED_DIALECTS)
+            raise ValueError(f"Unsupported dialect: {dialect}. Choose one of: {supported}")
+        return f"You are a helpful assistant. 请用{dialect}表达。<|endofprompt|>"
+    if args.instruct_text:
+        return args.instruct_text
+    supported = ", ".join(SUPPORTED_DIALECTS)
+    raise ValueError(
+        "Dialect/accent generation needs --dialect, --instruct-text, or a speaker in DIALECT_BY_SPEAKER. "
+        f"CosyVoice-supported dialects: {supported}"
+    )
+
+
 def synthesize_one(cosyvoice, mode: str, tts_text: str, ref_wav: Path, args) -> torch.Tensor:
     effective_mode = resolve_generation_mode(mode, ref_wav)
     if effective_mode == "cross_lingual":
@@ -191,7 +220,7 @@ def synthesize_one(cosyvoice, mode: str, tts_text: str, ref_wav: Path, args) -> 
     elif effective_mode == "instruct2":
         generator = cosyvoice.inference_instruct2(
             tts_text,
-            args.instruct_text,
+            build_instruct_text(args, ref_wav),
             str(ref_wav),
             stream=False,
             speed=args.speed,
@@ -221,7 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["auto", "cross_lingual", "zero_shot", "instruct2"], default="auto", help="Generation mode; auto uses instruct2 for light_accent refs and cross_lingual for standard refs")
     parser.add_argument("--prompt-text", default="", help="Reference transcript for zero_shot mode")
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help="Prefix for cross_lingual mode")
-    parser.add_argument("--instruct-text", default=DEFAULT_ACCENT_INSTRUCT, help="Instruction text for instruct2/accent mode")
+    parser.add_argument("--instruct-text", default=DEFAULT_ACCENT_INSTRUCT, help="Explicit CosyVoice instruct2 text; must include <|endofprompt|>")
+    parser.add_argument("--dialect", choices=SUPPORTED_DIALECTS, default="", help="Override the speaker dialect mapping for instruct2, e.g. 陕西话 or 河南话")
     parser.add_argument("--speed", type=float, default=1.0, help="CosyVoice speed parameter")
     parser.add_argument("--split", default="train", help="Metadata split value")
     parser.add_argument("--fp16", action="store_true", help="Load model with fp16")
@@ -251,7 +281,8 @@ def main() -> None:
     if args.dry_run:
         for row, tts_text, ref_wav, out_path in planned[:20]:
             effective_mode = resolve_generation_mode(args.mode, ref_wav)
-            print(f"DRY RUN: {row["key"]} + {ref_wav.name} -> {out_path}; mode={effective_mode}; tts_text={tts_text}")
+            instruct_text = build_instruct_text(args, ref_wav) if effective_mode == "instruct2" else ""
+            print(f"DRY RUN: {row['key']} + {ref_wav.name} -> {out_path}; mode={effective_mode}; tts_text={tts_text}; instruct_text={instruct_text}")
         return
 
     cosyvoice_dir = Path(args.cosyvoice_dir)
@@ -268,7 +299,8 @@ def main() -> None:
             print(f"[{index}/{len(planned)}] skip existing {out_path}")
         else:
             effective_mode = resolve_generation_mode(args.mode, ref_wav)
-            print(f"[{index}/{len(planned)}] synthesize {row['key']} with {ref_wav.name} via {effective_mode}")
+            instruct_text = build_instruct_text(args, ref_wav) if effective_mode == "instruct2" else ""
+            print(f"[{index}/{len(planned)}] synthesize {row['key']} with {ref_wav.name} via {effective_mode}; instruct_text={instruct_text}")
             speech = synthesize_one(cosyvoice, args.mode, tts_text, ref_wav, args)
             save_tensor_wav(out_path, speech, cosyvoice.sample_rate)
             print(f"wrote {out_path} ({wav_duration(out_path):.2f}s)")

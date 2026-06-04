@@ -1,0 +1,30 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# External inference code and model weights
+CosyVoice/
+pretrained_models/
+
+# Local audio resources and generated data
+refs/
+noise/
+outputs/
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.aac
+*.ogg
+
+# Logs and temporary files
+*.log
+*.tmp
+.DS_Store

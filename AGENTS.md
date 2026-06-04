@@ -2,72 +2,66 @@
 
 ## Project Structure & Module Organization
 
-This repository currently contains planning documents for an aviation-command TTS data generator: `memory-bank/design-document.md` and `memory-bank/tech-stack.md`. The intended implementation is a Python package:
+This repository is for generating synthetic aviation-command audio, not for building a full application. The current planning docs live in `memory-bank/`.
+
+Recommended working layout:
 
 ```text
-atc_tts_generator/      # source package
-configs/generation.yaml # runtime configuration
-tests/                  # pytest tests
-atc_tts_dataset/        # generated data, wavs, metadata, logs
+cleaned_transcripts.csv                 # input text CSV
+CosyVoice/                              # cloned inference code
+pretrained_models/Fun-CosyVoice3-0.5B-2512/
+refs/                                   # reference speaker wavs
+noise/                                  # MUSAN or radio/airport noise wavs
+outputs/clean/                          # generated clean wavs
+outputs/noisy/                          # augmented wavs
+outputs/metadata.csv                    # training metadata
+generate_tts.py                         # CSV -> clean wav
+augment_audio.py                        # clean wav -> noisy/radio wav
+memory-bank/                            # design, tech stack, plan, progress
 ```
 
-Keep source modules focused: `normalizer.py` for aviation text rules, `cosyvoice_client.py` for TTS integration, `augmentation.py` and `radio_effects.py` for audio processing, and `quality.py` for validation.
+## Development Commands
 
-## Build, Test, and Development Commands
+Use a simple Python environment. Follow CosyVoice installation instructions first, then add lightweight data-processing dependencies.
 
-Recommended setup:
+Useful commands:
 
 ```bash
-conda create -n atc-tts python=3.10 -y
-conda activate atc-tts
-pip install -e .
-pip install -r requirements-dev.txt
+git clone https://github.com/FunAudioLLM/CosyVoice
+modelscope download --model FunAudioLLM/Fun-CosyVoice3-0.5B-2512 --local_dir pretrained_models/Fun-CosyVoice3-0.5B-2512
+python generate_tts.py
+python augment_audio.py
 ```
 
-Expected CLI commands after implementation:
-
-```bash
-atc-tts generate --config configs/generation.yaml --stage all
-atc-tts validate --config configs/generation.yaml
-atc-tts inspect --metadata atc_tts_dataset/metadata.csv
-pytest
-ruff check .
-```
-
-`generate` creates clean/noisy wavs and metadata, `validate` runs quality checks, and `inspect` summarizes generated data.
+Start with one sample, then ten samples, then full generation.
 
 ## Coding Style & Naming Conventions
 
-Use Python 3.10, 4-space indentation, type hints for public functions, and clear module boundaries. Prefer small, testable functions over large scripts. Use `snake_case` for functions, variables, files, and config keys; use `PascalCase` for classes such as `CosyVoiceClient`.
+Keep scripts direct and readable. Use Python 3.10, 4-space indentation, and `snake_case` names. Avoid unnecessary frameworks, package scaffolding, web servers, databases, or task queues.
 
-Use `ruff` for linting and formatting. Keep generated audio, model weights, and large datasets out of source control.
+Use clear file naming for outputs, for example:
 
-## Testing Guidelines
+```text
+outputs/clean/ch01_01_001_spk001.wav
+outputs/noisy/ch01_01_001_spk001_snr10_radio.wav
+```
 
-Use `pytest`. Name tests as `tests/test_*.py` and test functions as `test_*`. Prioritize deterministic unit tests for:
+## Data and Metadata Guidelines
 
-- digit and slot normalization
-- YAML/Pydantic config validation
-- metadata row creation
-- SNR mixing math
-- silence, duration, and sample-rate checks
-- skip-existing resume logic
+Do not commit model weights, generated wavs, private speaker references, or large noise datasets. Keep those paths local.
 
-Treat real CosyVoice GPU inference as a smoke or integration test, not a normal unit test.
+`outputs/metadata.csv` should include at least:
 
-## Commit & Pull Request Guidelines
+```text
+utt_id,text,tts_text,speaker_id,snr,noise_type,radio_effect,wav_path
+```
 
-No git history is present in this workspace, so use a simple convention: short imperative commits such as `Add text normalizer` or `Implement metadata validation`.
+`text` keeps Arabic numerals for training labels. `tts_text` stores the spoken-form text sent to TTS.
 
-Pull requests should include a concise summary, changed modules, test results, and any data-generation assumptions. Link related issues when available. For changes affecting audio output, include sample metadata rows and the exact config used.
+## Agent-Specific Instructions
 
-## Security & Configuration Tips
+**写任何代码前必须完整阅读 `memory-bank/architecture.md`。**
 
-Do not commit reference speaker audio, generated wavs, model checkpoints, or private datasets unless explicitly approved. Keep paths and generation parameters in `configs/generation.yaml`; avoid hard-coded absolute paths.
-**重要提示**
+**写任何代码前必须完整阅读 `memory-bank/design-document.md`。**
 
-**写任何代码前必须完整阅读memory-bank/architecture.md**
-
-**写任何代码前必须完整阅读memory-bank/design-document.md**
-
-**每完成一个重大功能或里程碑后，必须更新memory-bank/architecture.md**
+**每完成一个重大功能或里程碑后，必须更新 `memory-bank/progress.md`。**

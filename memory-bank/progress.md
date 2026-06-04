@@ -1,13 +1,20 @@
 # Progress
 
 - 已将方案调整为最简脚本式数据生成流程。
-- 2026-06-03：已完成实施计划第 1 步，确认 `refs/`、`noise/`、`outputs/clean/`、`outputs/noisy/`、`pretrained_models/` 目录存在。
-- 2026-06-03：已完成实施计划第 2 步，`CosyVoice/` 远端为 `https://github.com/FunAudioLLM/CosyVoice.git`，并已初始化 `third_party/Matcha-TTS` 子模块。
-- 2026-06-03：已重新运行 ModelScope 下载并完成实施计划第 3 步，`pretrained_models/Fun-CosyVoice3-0.5B-2512/` 中已存在 `llm.pt`、`llm.rl.pt`、`flow.pt`、`hift.pt`、`cosyvoice3.yaml` 等关键文件；模型目录约 9.1G。
-- 2026-06-03：已完成实施计划第 4 步，根据 `fulltext.txt` 生成并扩充 `cleaned_transcripts.csv` 到 20000 条，保留对话字段 `dialogue_id`、`turn_index`、`speaker_role`，共 2880 段对话。
-- 2026-06-03：已运行 `python validate_input_csv.py`，确认 `cleaned_transcripts.csv` 包含 20000 条有效记录，`key` 无重复，`target` 无空值。
-- 下一步：等待用户验证第 4 步输入表；验证通过后执行第 5 步“准备参考说话人”。
-- 2026-06-03：曾根据用户决定更新第 5 步参考说话人方案为 12 段参考音频，即 6 个说话人，每人普通话版本和轻微口音/方言版本各 1 段。
-- 2026-06-04：用户已将 5 个说话人的普通话和方言版本放到根目录，第 5 步参考说话人方案调整为 10 段参考音频；`validate_refs.py` 已同步要求 `refs/` 下存在 10 个 wav。
-- 2026-06-04：已完成第 5 步“准备参考说话人”：根目录 10 段音频已转码并整理到 `refs/`，命名为 `spk001_standard.wav` 至 `spk005_light_accent.wav`；已运行 `python validate_refs.py`，确认 10 个 wav 全部可读，时长 14.52-18.62 秒，采样率 24000 Hz，单声道。
-- 下一步：等待用户验证第 5 步参考音频；用户验证通过前不要开始第 6 步“准备噪声素材”。
+- 2026-06-03：已完成第 1 步目录准备，确认 `refs/`、`noise/`、`outputs/clean/`、`outputs/noisy/`、`pretrained_models/` 目录存在。
+- 2026-06-03：已完成第 2 步 CosyVoice 代码准备，`CosyVoice/` 远端为 `https://github.com/FunAudioLLM/CosyVoice.git`，并已初始化 `third_party/Matcha-TTS` 子模块。
+- 2026-06-03：已完成第 3 步模型下载，`pretrained_models/Fun-CosyVoice3-0.5B-2512/` 中已存在 `llm.pt`、`llm.rl.pt`、`flow.pt`、`hift.pt`、`cosyvoice3.yaml` 等关键文件；模型目录约 9.1G。
+- 2026-06-03：已完成第 4 步输入 CSV，根据 `fulltext.txt` 生成并扩充 `cleaned_transcripts.csv` 到 20000 条，保留 `dialogue_id`、`turn_index`、`speaker_role`，共 2880 段对话；`python validate_input_csv.py` 验证通过。
+- 2026-06-04：已完成第 5 步参考说话人准备。用户提供 5 个说话人的普通话和方言版本，已转码整理为 `refs/spk001_standard.wav` 至 `refs/spk005_light_accent.wav` 共 10 段；`python validate_refs.py` 验证 10 个 wav 全部可读，时长 14.52-18.62 秒，24000 Hz，单声道。
+- 2026-06-04：已完成第 6 步噪声素材准备。按用户要求 `noise/` 只保留电台静态噪声 `radio_static_lw_freesound_84915_cc0.wav`，并更新 `noise/SOURCES.md`。
+- 2026-06-04：已完成 GPU 环境配置验证：`torch 2.8.0+cu128` 可用 CUDA，设备为 `NVIDIA GeForce RTX 5090`；`onnxruntime-gpu 1.26.0` 可用 `CUDAExecutionProvider`，`onnxruntime.get_device()` 返回 `GPU`。
+- 2026-06-04：已完成第 7 步 `generate_tts.py`，可读取 `cleaned_transcripts.csv` 的 `key`/`target`，扫描 `refs/`，按 `--limit`、`--start`、`--ref-limit`、`--ref` 选择样本，调用 CosyVoice3 生成 clean wav，并支持 `--skip-existing`、`--append-metadata`。
+- 2026-06-04：已完成第 8 步数字读法预处理。`text` 保留阿拉伯数字，`tts_text` 使用航空读法；已验证 `4151 -> 四幺五幺`、`733.9 -> 拐三三.九`、`0到2 -> 洞到两`。
+- 2026-06-04：已完成第 9 步 `augment_audio.py`，可混入 `radio_static_lw_freesound_84915_cc0.wav`，输出 8kHz 单声道 radio/noisy wav，支持 SNR、带通、轻微 clipping/dropout、追加 metadata 和跳过已有文件。
+- 2026-06-04：已完成第 10 步 metadata 写入。`outputs/metadata.csv` 字段包含 `utt_id,text,tts_text,speaker_id,accent,gender,speed,snr,noise_type,radio_effect,wav_path,split`，clean/noisy 均可写入并按 `utt_id` 去重。
+- 2026-06-04：已完成第 11 步 smoke test：生成 10 条 `spk001_standard` clean wav，并增强为 10 条 10dB noisy wav；metadata 检查显示 clean/noisy 各 10 行、缺失路径 0；样例 noisy wav 为 8000 Hz、单声道、16-bit。
+- 2026-06-04：已完成第 12 步全参考小批量演练：运行 `LIMIT=1 REGULAR_SNRS=10 EXTREME_LIMIT=1 ./run_full_generation.sh`，覆盖 10 段参考音频各 1 条 clean，并追加 10dB 与 0dB radio noisy；当前 `outputs/metadata.csv` 共 30 行，其中 clean 19 行、noisy 11 行，所有 `wav_path` 均存在。
+- 2026-06-04：根据用户反馈，旧版 `light_accent` 生成结果听感仍接近普通话；原因是默认 `cross_lingual` 只用参考音频做条件，目标文本仍由普通话文本前端规范化，不能可靠保留方言/口音。
+- 2026-06-04：已修正 `generate_tts.py` 的方言/口音生成策略：默认 `--mode auto`，`standard` 参考音频继续使用 `cross_lingual`，非 `standard` 参考音频自动使用 CosyVoice3 `instruct2`；默认指令为 `You are a helpful assistant. 请用与参考音频一致的方言或口音表达，尽量模仿参考音频的语调、发音习惯和说话节奏，不要改成标准普通话。<|endofprompt|>`。
+- 2026-06-04：已重新验证方言/口音模式：`python generate_tts.py --dry-run --limit 1 --ref spk001_light_accent` 显示 `mode=instruct2`，`--ref spk001_standard` 显示 `mode=cross_lingual`；已生成新测试样本 `outputs/accent_test/utt_000001_spk001_light_accent.wav` 和较长样本 `outputs/accent_test/utt_001464_spk001_light_accent.wav`。
+- 当前未完成：第 12 步全量 20000 条文本 × 10 段参考音频尚未完整生成；下一步需先由用户听测新的 `instruct2` 方言样本是否合格，确认后再使用修正后的 `run_full_generation.sh` 断点续跑全量 clean，并生成 20/10/5dB noisy 和少量 0dB noisy。注意旧的 `outputs/clean/*light_accent.wav` 小样本来自修正前策略，不能作为最终方言产物验收依据。

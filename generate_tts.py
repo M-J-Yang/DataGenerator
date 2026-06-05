@@ -24,6 +24,25 @@ SUPPORTED_DIALECTS = (
     "湖南话", "江西话", "闽南话", "宁夏话", "山西话", "陕西话",
     "山东话", "上海话", "四川话", "天津话", "云南话",
 )
+DIALECT_SLUGS = {
+    "广东话": "guangdong",
+    "东北话": "dongbei",
+    "甘肃话": "gansu",
+    "贵州话": "guizhou",
+    "河南话": "henan",
+    "湖北话": "hubei",
+    "湖南话": "hunan",
+    "江西话": "jiangxi",
+    "闽南话": "minnan",
+    "宁夏话": "ningxia",
+    "山西话": "shanxi",
+    "陕西话": "shaanxi",
+    "山东话": "shandong",
+    "上海话": "shanghai",
+    "四川话": "sichuan",
+    "天津话": "tianjin",
+    "云南话": "yunnan",
+}
 DIALECT_BY_SPEAKER = {
     "spk001": "陕西话",
     "spk002": "陕西话",
@@ -113,6 +132,10 @@ def safe_name(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z_.-]+", "_", value)
 
 
+def dialect_slug(dialect: str) -> str:
+    return DIALECT_SLUGS.get(dialect, safe_name(dialect))
+
+
 def normalize_digits_for_tts(text: str) -> str:
     """Step 8 minimal aviation digit reading: replace each Arabic digit."""
     return "".join(DIGIT_READINGS.get(char, char) for char in text)
@@ -171,16 +194,22 @@ def write_metadata_rows(metadata_path: Path, rows: list[dict[str, str]], append:
             writer.writerow(row)
 
 
-def resolve_generation_mode(mode: str, ref_wav: Path) -> str:
+def resolve_generation_mode(mode: str, ref_wav: Path, args=None) -> str:
     if mode != "auto":
         return mode
+    if args is not None and (args.dialect or args.instruct_text):
+        return "instruct2"
     _, accent, _ = parse_ref_metadata(ref_wav)
     return "instruct2" if accent != "standard" else "cross_lingual"
 
 
-def build_instruct_text(args, ref_wav: Path) -> str:
+def resolve_dialect(args, ref_wav: Path) -> str:
     speaker_id, _, _ = parse_ref_metadata(ref_wav)
-    dialect = args.dialect or DIALECT_BY_SPEAKER.get(speaker_id, "")
+    return args.dialect or DIALECT_BY_SPEAKER.get(speaker_id, "")
+
+
+def build_instruct_text(args, ref_wav: Path) -> str:
+    dialect = resolve_dialect(args, ref_wav)
     if dialect:
         if dialect not in SUPPORTED_DIALECTS:
             supported = ", ".join(SUPPORTED_DIALECTS)
@@ -196,7 +225,7 @@ def build_instruct_text(args, ref_wav: Path) -> str:
 
 
 def synthesize_one(cosyvoice, mode: str, tts_text: str, ref_wav: Path, args) -> torch.Tensor:
-    effective_mode = resolve_generation_mode(mode, ref_wav)
+    effective_mode = resolve_generation_mode(mode, ref_wav, args)
     if effective_mode == "cross_lingual":
         model_text = f"{args.system_prompt}{tts_text}"
         generator = cosyvoice.inference_cross_lingual(
@@ -274,13 +303,16 @@ def main() -> None:
         text = row["target"]
         tts_text = normalize_digits_for_tts(text)
         for ref_wav in refs:
-            out_name = f"{safe_name(row['key'])}_{safe_name(ref_wav.stem)}.wav"
-            planned.append((row, tts_text, ref_wav, output_dir / out_name))
+            effective_mode = resolve_generation_mode(args.mode, ref_wav, args)
+            dialect = resolve_dialect(args, ref_wav) if effective_mode == "instruct2" else ""
+            dialect_suffix = f"_{dialect_slug(dialect)}" if dialect else ""
+            out_name = f"{safe_name(row['key'])}_{safe_name(ref_wav.stem)}{dialect_suffix}.wav"
+            planned.append((row, tts_text, ref_wav, dialect, output_dir / out_name))
 
     print(f"Selected {len(rows)} text row(s), {len(refs)} reference wav(s), {len(planned)} output wav(s).")
     if args.dry_run:
-        for row, tts_text, ref_wav, out_path in planned[:20]:
-            effective_mode = resolve_generation_mode(args.mode, ref_wav)
+        for row, tts_text, ref_wav, dialect, out_path in planned[:20]:
+            effective_mode = resolve_generation_mode(args.mode, ref_wav, args)
             instruct_text = build_instruct_text(args, ref_wav) if effective_mode == "instruct2" else ""
             print(f"DRY RUN: {row['key']} + {ref_wav.name} -> {out_path}; mode={effective_mode}; tts_text={tts_text}; instruct_text={instruct_text}")
         return
@@ -294,21 +326,23 @@ def main() -> None:
 
     cosyvoice = AutoModel(model_dir=args.model_dir, fp16=args.fp16, load_vllm=args.load_vllm)
     metadata_rows = []
-    for index, (row, tts_text, ref_wav, out_path) in enumerate(planned, start=1):
+    for index, (row, tts_text, ref_wav, dialect, out_path) in enumerate(planned, start=1):
         if args.skip_existing and out_path.exists() and out_path.stat().st_size > 0:
             print(f"[{index}/{len(planned)}] skip existing {out_path}")
         else:
-            effective_mode = resolve_generation_mode(args.mode, ref_wav)
+            effective_mode = resolve_generation_mode(args.mode, ref_wav, args)
             instruct_text = build_instruct_text(args, ref_wav) if effective_mode == "instruct2" else ""
             print(f"[{index}/{len(planned)}] synthesize {row['key']} with {ref_wav.name} via {effective_mode}; instruct_text={instruct_text}")
             speech = synthesize_one(cosyvoice, args.mode, tts_text, ref_wav, args)
             save_tensor_wav(out_path, speech, cosyvoice.sample_rate)
             print(f"wrote {out_path} ({wav_duration(out_path):.2f}s)")
 
-        speaker_id, accent, gender = parse_ref_metadata(ref_wav)
+        speaker_id, ref_accent, gender = parse_ref_metadata(ref_wav)
+        accent = dialect or ref_accent
+        utt_dialect_suffix = f"_{dialect_slug(dialect)}" if dialect else ""
         metadata_rows.append(
             {
-                "utt_id": f"{row['key']}_{safe_name(ref_wav.stem)}_clean",
+                "utt_id": f"{row['key']}_{safe_name(ref_wav.stem)}{utt_dialect_suffix}_clean",
                 "text": row["target"],
                 "tts_text": tts_text,
                 "speaker_id": speaker_id,
